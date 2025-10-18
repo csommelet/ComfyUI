@@ -319,8 +319,13 @@ class WanVaceToVideo(io.ComfyNode):
             control_video = torch.ones((length, height, width, 3)) * 0.5
 
         if reference_image is not None:
-            reference_image = comfy.utils.common_upscale(reference_image[:1].movedim(-1, 1), width, height, "bilinear", "center").movedim(1, -1)
-            reference_image = vae.encode(reference_image[:, :, :, :3])
+            reference_image = torch.cat([
+                vae.encode(
+                    comfy.utils.common_upscale(ref_image.unsqueeze(0)[:, :, :, :3].movedim(-1, 1), 
+                        width, height, "bilinear", "center").movedim(1, -1))
+                for ref_image in reference_image
+            ], dim=2)
+            # reference_image = vae.encode(reference_image[:, :, :, :3])
             reference_image = torch.cat([reference_image, comfy.latent_formats.Wan21().process_out(torch.zeros_like(reference_image))], dim=1)
 
         if control_masks is None:
