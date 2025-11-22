@@ -5,7 +5,7 @@ torch
 torchsde
 torchvision
 torchaudio
-numpy>=1.25.0
+numpy>=1.25.0,<2.0.0
 einops
 transformers>=4.37.2
 tokenizers>=0.13.3
