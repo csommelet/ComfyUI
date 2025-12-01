@@ -59,6 +59,115 @@ def pil_to_tensor(img: Image.Image) -> torch.Tensor:
     return t.unsqueeze(0)
 
 
+def simple_paste_resized_clipped(
+    target,
+    new_face,
+    rect: tuple[int, int, int, int],
+):
+    source = tensor_to_pil(new_face)
+
+    """
+    Paste `source` resized into rect on target.
+    If ref_img is None, use target region under the paste area as reference,
+    masked by the alpha of the source.
+    """
+    tgt_h, tgt_w = target.shape[1:3]
+    print(tgt_h, tgt_w)
+    left, top, right, bottom = rect
+    logging.info(f"#KES# target {target.shape}")
+    rect_w = right - left
+    rect_h = bottom - top
+    if rect_w <= 0 or rect_h <= 0:
+        logging.info(f"#KES# target {target.shape}")
+        return target
+
+    # 1) Resize source
+    src_resized = source.resize((rect_w, rect_h), Image.LANCZOS)
+
+    # 2) Visible region
+    vis_left   = max(left, 0)
+    vis_top    = max(top, 0)
+    vis_right  = min(right, tgt_w)
+    vis_bottom = min(bottom, tgt_h)
+
+    if vis_left >= vis_right or vis_top >= vis_bottom:
+        logging.info(f"#KES# target {target.shape}")
+        return target
+
+    # 3) Crop visible part from source
+    sx1 = vis_left - left
+    sy1 = vis_top - top
+    sx2 = sx1 + (vis_right - vis_left)
+    sy2 = sy1 + (vis_bottom - vis_top)
+
+    src_crop = src_resized.crop((sx1, sy1, sx2, sy2)).convert("RGBA")
+
+    # target[0,   vis_top:vis_bottom, vis_left:vis_right, :] = 0
+    target_img = tensor_to_pil(target)
+    target_img.paste(src_crop, (vis_left, vis_top), src_crop)
+
+    target_pasted = torch.tensor(np.asarray(target_img, dtype=np.float32) / 255.0).unsqueeze(0)
+    logging.info(f"#KES# target_pasted {target_pasted.shape}")
+    return target_pasted
+
+
+
+class SimplePasteImageNode(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="CSomSimplePasteImagee",
+            display_name="CSom Simple Paste Image Node",
+            category="",
+            inputs=[
+                io.Image.Input("image"),
+                io.Image.Input("image_to_paste"),
+                io.Custom("CSOM_PASTE_DATA").Input("paste_data", optional=True),
+                io.Int.Input("x", default=0, optional=True),
+                io.Int.Input("y", default=0, optional=True),
+                io.Int.Input("width", default=0, optional=True),
+                io.Int.Input("height", default=0, optional=True),
+            ],
+            outputs=[
+                io.Image.Output(),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, image, image_to_paste, paste_data=None, x=0, y=0, width=0, height=0) -> io.NodeOutput:
+        out = image.clone()
+        # c0 = torch.maximum(torch.tensor((0, 0)), torch.tensor(paste_data[0:2])).int()
+        # c1 = torch.maximum(torch.tensor((image.shape[1], image.shape[0])), torch.tensor(paste_data[2:4])).int()
+        # out[:, c0[1]:c1[1], c0[0]:c1[0],:] = 0
+        i0 = image.clone()
+        i1 = image_to_paste.clone()
+        logging.info(f"#KES# {image.shape} {image_to_paste.shape}")
+        pd = [x, y, x+width, y+height] if paste_data is None else [int(round(v)) for v in paste_data]
+        res = simple_paste_resized_clipped(
+            i0,
+            i1,
+            pd,
+        )
+        logging.info(f"#KES# res {res.shape}")
+        return io.NodeOutput(
+            res.clone(),
+        )
+
+    """
+        The node will always be re executed if any of the inputs change but
+        this method can be used to force the node to execute again even when the inputs don't change.
+        You can make this node return a number or a string. This value will be compared to the one returned the last time the node was
+        executed, if it is different the node will be executed again.
+        This method is used in the core repo for the LoadImage node where they return the image hash as a string, if the image hash
+        changes between executions the LoadImage node is executed again.
+    """
+    @classmethod
+    def fingerprint_inputs(*args, **kwargs):
+        v = int(os.path.getmtime(__file__))
+        logging.info(f"#KES3# fingerprint_inputs {v}")
+        return v
+
+
 def paste_resized_clipped(
     target,
     target_face_mask,
@@ -162,55 +271,6 @@ def paste_resized_clipped(
 
     target_pasted = torch.tensor(np.asarray(target_img, dtype=np.float32) / 255.0).unsqueeze(0)
     return new_color_matched, target_masked, target_pasted
-
-class PasteImageNode(io.ComfyNode):
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="CSomPasteImagee",
-            display_name="CSom Paste Image Node",
-            category="",
-            inputs=[
-                io.Image.Input("image"),
-                io.Image.Input("image_to_paste"),
-                io.Custom("CSOM_PASTE_DATA").Input("paste_data")
-            ],
-            outputs=[
-                io.Image.Output(),
-            ],
-        )
-
-    @classmethod
-    def execute(cls, image, image_to_paste, paste_data) -> io.NodeOutput:
-        out = image.clone()
-        # c0 = torch.maximum(torch.tensor((0, 0)), torch.tensor(paste_data[0:2])).int()
-        # c1 = torch.maximum(torch.tensor((image.shape[1], image.shape[0])), torch.tensor(paste_data[2:4])).int()
-        # out[:, c0[1]:c1[1], c0[0]:c1[0],:] = 0
-        i0 = tensor_to_pil(image.clone())
-        i1 = tensor_to_pil(image_to_paste)
-        logging.info(f"#KES# {image.shape} {image_to_paste.shape}")
-        res = pil_to_tensor(paste_resized_clipped(
-            i0,
-            i1,
-            [int(round(v)) for v in paste_data],
-        ))
-        return io.NodeOutput(
-            res,
-        )
-
-    """
-        The node will always be re executed if any of the inputs change but
-        this method can be used to force the node to execute again even when the inputs don't change.
-        You can make this node return a number or a string. This value will be compared to the one returned the last time the node was
-        executed, if it is different the node will be executed again.
-        This method is used in the core repo for the LoadImage node where they return the image hash as a string, if the image hash
-        changes between executions the LoadImage node is executed again.
-    """
-    @classmethod
-    def fingerprint_inputs(*args, **kwargs):
-        v = int(os.path.getmtime(__file__))
-        logging.info(f"#KES3# fingerprint_inputs {v}")
-        return v
 
 
 class PasteImageNode(io.ComfyNode):

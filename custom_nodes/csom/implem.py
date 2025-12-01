@@ -16,6 +16,7 @@ import os
 import paste_image_node
 importlib.reload(paste_image_node)
 from paste_image_node import PasteImageNode as PasteImageNode
+from paste_image_node import SimplePasteImageNode as SimplePasteImageNode
 
 import color_match
 importlib.reload(color_match)
@@ -96,11 +97,11 @@ class DWPoseKeysNode(io.ComfyNode):
 
         # NOSE, NECK, EYE_L< E
         sel = [0,1,2,5,14,15,16,17]
-        bbs = [bb(k[sel][-4:]) for k in ks]
+        bbs = [bb(k[sel][:]) for k in ks]
 
         # cts = [((bbs[i][1] + bbs[i][0])) * 0.5 for i in range(2)]
         # mds = [np.max(bbs[i][1] - bbs[i][0])for i in range(2) ]
-        cts = [ks[i][0,:2] * 1.0 for i in range(2)]
+        cts = [(ks[i][14,:2] + ks[i][15,:2])/2 for i in range(2)]
         mds = [np.linalg.norm(ks[i][14,:2] - ks[i][15,:2]) for i in range(2) ]
 
         logging.info(f"{ks[0][sel,:2]}")
@@ -113,7 +114,7 @@ class DWPoseKeysNode(io.ComfyNode):
             sc = mds[0] / mds[i] / (1.0 + i * 0.0)
             tr = cts[0] - cts[i] * sc
             logging.info(f"{sc} {tr} {tr + ks[i][sel,:2] * sc}")
-            ks[i][sel,:2] = (tr + ks[i][sel,:2] * sc) / (w, h)
+            ks[i][:,:2] = (tr + ks[i][:,:2] * sc) / (w, h)
             if i == 1:
                 paste_data = (((0, 0) - tr) / sc).tolist() + (((w, h) - tr) / sc).tolist()
 
@@ -318,5 +319,3 @@ class FixColorNode(io.ComfyNode):
     def fingerprint_inputs(*args, **kwargs):
         v = int(os.path.getmtime(__file__))
         return f"{v}-{color_match.modiftime()}"
-
-

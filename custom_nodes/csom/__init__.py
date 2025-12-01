@@ -72,6 +72,7 @@ class CSomExtension(ComfyExtension):
             ReloadNode,
             make_node_proxy("DWPoseKeysNode", True),
             make_node_proxy("PasteImageNode", True),
+            make_node_proxy("SimplePasteImageNode", True),
             make_node_proxy("CalibrationFrameNode", True),
             make_node_proxy("FixColorNode", True),
         ]
